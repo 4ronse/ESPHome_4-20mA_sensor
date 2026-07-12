@@ -1,0 +1,200 @@
+# -----------------------------------------------------------------------------
+# Generic 4-20mA sensor block.
+#
+# Creates:
+#   - Raw ADC voltage
+#   - Runtime calibration for the 4mA / 12mA / 20mA points
+#   - Runtime min/max scaling
+#   - Current (mA)
+#   - Scaled value
+#   - Fault sensor for under/over-range current
+#
+# Example:
+#
+# packages:
+#   ph_sensor:
+#     url: https://github.com/4ronse/ESPHome_4-20mA_sensor
+#     ref: main
+#     refresh: 1d
+#     files:
+#       - path: template.yml
+#         vars:
+#           id_prefix: ph
+#           name_prefix: "pH Sensor"
+#           pin: GPIO1
+#           unit: "pH"
+#           device_class: "ph"
+#           icon: "mdi:ph"
+#           initial_min: 2.0
+#           initial_max: 12.0
+#           range_min: 0.0
+#           range_max: 14.0
+#           range_step: 0.1
+#
+# Required variables:
+#   id_prefix
+#   name_prefix
+#   pin
+#   unit
+#   device_class
+#   icon
+#   initial_min
+#   initial_max
+#   range_min
+#   range_max
+#   range_step
+#
+# Optional variables:
+#   accuracy_decimals (default: 2)
+#   hide_value        (default: false)
+#   fault_low_mA      (default: 3.8)
+#   fault_high_mA     (default: 21.0)
+# -----------------------------------------------------------------------------
+
+defaults:
+  accuracy_decimals: 2
+  hide_value: false
+  fault_low_mA: 3.8
+  fault_high_mA: 21.0
+
+number:
+  - platform: template
+    name: "${name_prefix} - 4mA Calibration Voltage"
+    id: cal_input_${id_prefix}_4mA
+    initial_value: 0.026
+    min_value: 0
+    max_value: 3.33
+    step: 0.001
+    mode: BOX
+    unit_of_measurement: V
+    device_class: voltage
+    restore_value: true
+    optimistic: true
+    icon: "mdi:sine-wave"
+
+  - platform: template
+    name: "${name_prefix} - 12mA Calibration Voltage"
+    id: cal_input_${id_prefix}_12mA
+    initial_value: 1.286
+    min_value: 0
+    max_value: 3.33
+    step: 0.001
+    mode: BOX
+    unit_of_measurement: V
+    device_class: voltage
+    restore_value: true
+    optimistic: true
+    icon: "mdi:sine-wave"
+
+  - platform: template
+    name: "${name_prefix} - 20mA Calibration Voltage"
+    id: cal_input_${id_prefix}_20mA
+    initial_value: 2.613
+    min_value: 0
+    max_value: 3.33
+    step: 0.001
+    mode: BOX
+    unit_of_measurement: V
+    device_class: voltage
+    restore_value: true
+    optimistic: true
+    icon: "mdi:sine-wave"
+
+  - platform: template
+    name: "${name_prefix} - Minimum ${unit}"
+    id: cal_input_${id_prefix}_min
+    initial_value: ${initial_min}
+    min_value: ${range_min}
+    max_value: ${range_max}
+    step: ${range_step}
+    mode: BOX
+    unit_of_measurement: "${unit}"
+    device_class: ${device_class}
+    restore_value: true
+    optimistic: true
+    icon: "mdi:format-vertical-align-bottom"
+
+  - platform: template
+    name: "${name_prefix} - Maximum ${unit}"
+    id: cal_input_${id_prefix}_max
+    initial_value: ${initial_max}
+    min_value: ${range_min}
+    max_value: ${range_max}
+    step: ${range_step}
+    mode: BOX
+    unit_of_measurement: "${unit}"
+    device_class: ${device_class}
+    restore_value: true
+    optimistic: true
+    icon: "mdi:format-vertical-align-top"
+
+sensor:
+  - platform: adc
+    pin: ${pin}
+    id: adc_voltage_${id_prefix}
+    name: "${name_prefix} Raw Voltage"
+    attenuation: 12db
+    samples: 128
+    update_interval: 20s
+    accuracy_decimals: 4
+    unit_of_measurement: "V"
+    filters:
+      - median:
+          window_size: 7
+          send_every: 1
+          send_first_at: 1
+    on_value:
+      then:
+        - component.update: current_mA_${id_prefix}
+        - component.update: value_${id_prefix}
+
+  - platform: template
+    id: current_mA_${id_prefix}
+    name: "${name_prefix} Current"
+    unit_of_measurement: "mA"
+    update_interval: never
+    accuracy_decimals: 2
+    icon: "mdi:current-dc"
+    device_class: current
+    lambda: |-
+      const float v   = id(adc_voltage_${id_prefix}).state;
+      const float v4  = id(cal_input_${id_prefix}_4mA).state;
+      const float v12 = id(cal_input_${id_prefix}_12mA).state;
+      const float v20 = id(cal_input_${id_prefix}_20mA).state;
+
+      if (isnan(v) || v12 <= v4 || v20 <= v12) return NAN;
+
+      if (v <= v12) return 4.0f + (v - v4) * 8.0f / (v12 - v4);
+      return 12.0f + (v - v12) * 8.0f / (v20 - v12);
+
+  - platform: template
+    id: value_${id_prefix}
+    name: "${name_prefix} Value"
+    unit_of_measurement: "${unit}"
+    update_interval: never
+    accuracy_decimals: ${accuracy_decimals}
+    device_class: ${device_class}
+    icon: "${icon}"
+    disabled_by_default: ${hide_value}
+    lambda: |-
+      const float mA = id(current_mA_${id_prefix}).state;
+      if (isnan(mA)) return NAN;
+
+      const float out_min = id(cal_input_${id_prefix}_min).state;
+      const float out_max = id(cal_input_${id_prefix}_max).state;
+      const float res = (mA - 4.0f) * (out_max - out_min) / 16.0f + out_min;
+
+      if (res < out_min) return out_min;
+      if (res > out_max) return out_max;
+      return res;
+
+binary_sensor:
+  - platform: template
+    name: "${name_prefix} Fault"
+    id: fault_${id_prefix}
+    device_class: problem
+    icon: "mdi:alert-circle"
+    lambda: |-
+      const float mA = id(current_mA_${id_prefix}).state;
+      if (isnan(mA)) return {};
+      return mA < ${fault_low_mA} || mA > ${fault_high_mA};
