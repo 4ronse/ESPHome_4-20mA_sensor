@@ -45,10 +45,13 @@
 #   range_step
 #
 # Optional variables:
-#   accuracy_decimals (default: 2)
-#   hide_value        (default: false)
-#   fault_low_mA      (default: 3.8)
-#   fault_high_mA     (default: 21.0)
+#   accuracy_decimals   (default: 2)
+#   hide_value          (default: false)
+#   fault_low_mA        (default: 3.8)
+#   fault_high_mA       (default: 21.0)
+#   update_interval     (default: 20s)
+#   median_window_size  (default: "7")    - Set to 1 to disable filtering
+#   ema_alpha           (default: "1.0")  - Set to 1.0 to disable filtering
 # -----------------------------------------------------------------------------
 
 defaults:
@@ -56,6 +59,9 @@ defaults:
   hide_value: false
   fault_low_mA: 3.8
   fault_high_mA: 21.0
+  update_interval: 20s
+  median_window_size: "7"
+  ema_alpha: "1.0"
 
 number:
   - platform: template
@@ -135,14 +141,17 @@ sensor:
     name: "${name_prefix} Raw Voltage"
     attenuation: 12db
     samples: 128
-    update_interval: 20s
+    update_interval: ${update_interval}
     accuracy_decimals: 4
     unit_of_measurement: "V"
     filters:
       - median:
-          window_size: 7
+          window_size: ${median_window_size}
           send_every: 1
           send_first_at: 1
+      - exponential_moving_average:
+          alpha: ${ema_alpha}
+          send_every: 1
     on_value:
       then:
         - component.update: current_mA_${id_prefix}
