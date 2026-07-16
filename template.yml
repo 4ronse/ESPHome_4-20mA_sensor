@@ -60,7 +60,7 @@ defaults:
   fault_low_mA: 3.8
   fault_high_mA: 21.0
   update_interval: 20s
-  median_window_size: "7"
+  median_window_size: "3" # By default, value updates every 3 samples (60s). Set to 1 to disable filtering.
   ema_alpha: "1.0"
 
 number:
